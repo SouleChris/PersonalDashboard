@@ -8,6 +8,7 @@ STRAVA MIGRATION: See comments marked STRAVA to add Strava API later
 import { useState, useEffect, useMemo } from "react"
 import styles from "../styles/workout.module.css"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts"
+import LoadingSpinner from "../components/loadSpinner"
 
 const WORKOUT_TYPES = ["Run", "Lift", "Hike", "Other"]
 const MUSCLE_GROUPS = ["Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Full Body"]
@@ -31,20 +32,12 @@ const getMET = (type, form) => {
   if (type === "Run") {
     const pace = form.pace ? parseFloat(form.pace.split(":")[0]) + parseFloat(form.pace.split(":")[1] || 0) / 60 : null
     if (pace) {
-      if (pace < 5.0) return 19.0   // sub 5:00
-      if (pace < 5.5) return 17.5   // 5:00-5:30
-      if (pace < 6.0) return 16.0   // 5:30-6:00
-      if (pace < 6.5) return 14.5   // 6:00-6:30
-      if (pace < 7.0) return 13.5   // 6:30-7:00
-      if (pace < 7.5) return 12.5   // 7:00-7:30
-      if (pace < 8.0) return 11.5   // 7:30-8:00
-      if (pace < 8.5) return 11.0   // 8:00-8:30
-      if (pace < 9.0) return 10.5   // 8:30-9:00
-      if (pace < 9.5) return 9.8    // 9:00-9:30
-      if (pace < 10.0) return 9.0   // 9:30-10:00
-      if (pace < 11.0) return 8.3   // 10:00-11:00
-      if (pace < 12.0) return 7.5   // 11:00-12:00
-      return 6.0                     // 12+ min/mile
+      if (pace < 7) return 14.5   // < 7 min/mile, fast run
+      if (pace < 8) return 12.5   // 7-8 min/mile
+      if (pace < 9) return 11.0   // 8-9 min/mile
+      if (pace < 10) return 9.8   // 9-10 min/mile
+      if (pace < 12) return 8.3   // 10-12 min/mile, jog
+      return 6.0                   // 12+ min/mile, slow jog/walk
     }
     if (form.distance) return 9.8
     return 8.0
@@ -399,8 +392,8 @@ export default function Workout() {
   const todayStr = today.toISOString().split("T")[0]
   const todayWorkouts = workouts.filter(w => w.date === todayStr)
 
-  if (loading) return <div className={styles.container}><p>Loading workouts...</p></div>
-  if (error) return <div className={styles.container}><p style={{ color: "#e57373" }}>{error}</p></div>
+  if (loading) return <div className={styles.container}><LoadingSpinner text="Loading workouts..." /></div>
+  if (error) return <div className={styles.container}><p style={{ color: "#e57373", padding: "2rem" }}>{error}</p></div>
 
   const calendarDays = buildCalendarDays()
 

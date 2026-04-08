@@ -21,3 +21,123 @@ body {
   min-height: 100vh;
 }
 
+/* ── Light theme (default) ── */
+:root,
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-subtle: #f9f9f9;
+  --card-bg: #f9f9f9;
+  --border: #eeeeee;
+  --text-primary: #2c2c2c;
+  --text-muted: #888888;
+  --toggle-off: #cccccc;
+  --toggle-on: #4a7c4e;
+
+  --excellent-bg: #f0f7f0;
+  --excellent-border: #a8b8a0;
+  --excellent-text: #4a7c4e;
+  --good-bg: #f7f9f0;
+  --good-border: #c8d48a;
+  --good-text: #6a8a2e;
+  --average-bg: #fdf8e8;
+  --average-border: #f5c842;
+  --average-text: #b8922a;
+  --poor-bg: #fdf0f0;
+  --poor-border: #e57373;
+  --poor-text: #c0392b;
+
+  --win-border: #a8b8a0;
+  --loss-border: #e57373;
+  --win-text: #4a7c4e;
+  --loss-text: #c0392b;
+}
+
+/* ── Dark theme ── */
+[data-theme="dark"] {
+  --bg: #0f1117;
+  --bg-subtle: #1a1d27;
+  --card-bg: #1a1d27;
+  --border: #2e3140;
+  --text-primary: #e8e8e8;
+  --text-muted: #888888;
+  --toggle-off: #444444;
+  --toggle-on: #4a7c4e;
+
+  --excellent-bg: #1a2e1a;
+  --excellent-border: #3a5c3a;
+  --excellent-text: #7ab87e;
+  --good-bg: #1e2a10;
+  --good-border: #4a6020;
+  --good-text: #9ab84e;
+  --average-bg: #2a2010;
+  --average-border: #8a6800;
+  --average-text: #d4a830;
+  --poor-bg: #2a1010;
+  --poor-border: #8a3030;
+  --poor-text: #e07070;
+
+  --win-border: #3a5c3a;
+  --loss-border: #8a3030;
+  --win-text: #7ab87e;
+  --loss-text: #e07070;
+}
+
+/* ── Base styles ── */
+html {
+  overflow-y: scroll;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text-primary);
+  transition: background-color 0.2s ease, color 0.2s ease;
+  margin: 0;
+}
+
+/* ── Global loading spinner ── */
+/* Used by the shared LoadingSpinner component across all pages */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spinnerPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.loadingContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  gap: 1rem;
+}
+
+.loadingSpinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--text-muted);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+.loadingText {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* Inline spinner — used next to save/delete buttons */
+.inlineSpinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text-muted);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}

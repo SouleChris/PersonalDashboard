@@ -3,7 +3,7 @@
   align-items: center;
   gap: 2rem;
   padding: 1rem 2rem;
-  background-color: #0a1628;;
+  background-color: #0a1628;
   width: 100%;
 }
 
@@ -23,5 +23,18 @@
 }
 
 .link:hover {
+  color: #7c7c7c;
+}
+
+.settingsLink {
+  color: #d7d7d7;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  transition: color 0.2s;
+}
+
+.settingsLink:hover {
   color: #7c7c7c;
 }

@@ -1,29 +1,61 @@
-import { useState, useEffect } from "react"
+/*
+  Counterstrike Page Made in the Month of March in 2026
+  Author -> Christopher Soule
+  APIS -> leetify, leetify/matches
+  Reacharts used for showing information visually
+  What is this Page -> 
+    This page uses the leetify API to gather user data to show different in-game statistics.
+    Different views allow for different data to be represented depending on maps, periods of time
+      Overview -> Gives stats over the last 100 recent games
+      Recent Matches -> 
+      Per Map ->
+      Match History ->
+*/
+
+import { useState, useEffect, useMemo } from "react"
 import styles from "../styles/counterstrike.module.css"
 import { LineChart, Line, ScatterChart, Scatter, ZAxis, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
+import LoadingSpinner from "../components/loadSpinner"
 
 export default function CS2() {
   const [data, setData] = useState(null)
-  const [error, setError] = useState(null)
   const [matchesData, setMatchesData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [view, setView] = useState("overview")
   const [selectedMap, setSelectedMap] = useState(null)
   const [historyMode, setHistoryMode] = useState("all") // "byMap" | "all"
 
+  // Single coordinated fetch for both endpoints so loading/error state is shared
   useEffect(() => {
-    fetch("/leetify/matches")
-      .then(r => r.json())
-      .then(json => setMatchesData(json))
-      .catch(() => setError("Failed to load matches"))
+    const load = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const [profileRes, matchesRes] = await Promise.all([
+          fetch("/leetify"),
+          fetch("/leetify/matches")
+        ])
+        if (!profileRes.ok || !matchesRes.ok) {
+          throw new Error("Failed to load Leetify data")
+        }
+        const [profileJson, matchesJson] = await Promise.all([
+          profileRes.json(),
+          matchesRes.json()
+        ])
+        setData(profileJson)
+        setMatchesData(matchesJson)
+      } catch (err) {
+        console.error(err)
+        setError("Failed to load data")
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
   }, [])
 
-  useEffect(() => {
-    fetch("/leetify")
-      .then(r => r.json())
-      .then(json => setData(json))
-      .catch(() => setError("Failed to load data"))
-  }, [])
-
+  // gets 30 most recent matches from the leetify api
   const myStats = matchesData?.slice(0, 30).map((match, i) => {
     const me = match.stats?.find(p => p.steam64_id === import.meta.env.VITE_STEAM_ID)
     return {
@@ -48,130 +80,147 @@ export default function CS2() {
     return acc
   }, {})
 
-  const mapStats = matchesData ? Object.values(
-    matchesData.reduce((acc, match) => {
-      const me = match.stats?.find(p => p.steam64_id === import.meta.env.VITE_STEAM_ID)
-      if (!me) return acc
-      const map = match.map_name
-      const mapShort = map.replace("de_", "").replace("cs_", "")
-      if (!acc[mapShort]) {
-        acc[mapShort] = {
-          map: mapShort,
-          kd: [], dpr: [], hs_kills: [], trade_kill: [], preaim: [],
-          spray_accuracy: [], ct_leetify_rating: [], t_leetify_rating: [],
-          count: 0
+  const mapStats = useMemo(() => {
+    if (!matchesData) return []
+    return Object.values(
+      matchesData.reduce((acc, match) => {
+        const me = match.stats?.find(p => p.steam64_id === import.meta.env.VITE_STEAM_ID)
+        if (!me) return acc
+        const map = match.map_name
+        const mapShort = map.replace("de_", "").replace("cs_", "")
+        if (!acc[mapShort]) {
+          acc[mapShort] = {
+            map: mapShort,
+            kd: [], dpr: [], hs_kills: [], trade_kill: [], preaim: [],
+            spray_accuracy: [], ct_leetify_rating: [], t_leetify_rating: [],
+            count: 0
+          }
         }
+        acc[mapShort].kd.push(me.kd_ratio ?? 0)
+        acc[mapShort].dpr.push(me.dpr ?? 0)
+        acc[mapShort].hs_kills.push(me.total_hs_kills ?? 0)
+        acc[mapShort].trade_kill.push(me.trade_kills_success_percentage ?? 0)
+        acc[mapShort].preaim.push(me.preaim ?? 0)
+        acc[mapShort].spray_accuracy.push(me.spray_accuracy ?? 0)
+        acc[mapShort].ct_leetify_rating.push(me.ct_leetify_rating ?? 0)
+        acc[mapShort].t_leetify_rating.push(me.t_leetify_rating ?? 0)
+        acc[mapShort].count++
+        return acc
+      }, {})
+    ).map(m => {
+      const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length
+      return {
+        map: m.map,
+        kd: avg(m.kd).toFixed(2),
+        dpr: avg(m.dpr).toFixed(1),
+        hs_kills: avg(m.hs_kills).toFixed(1),
+        trade_kill: (avg(m.trade_kill) * 100).toFixed(1),
+        preaim: avg(m.preaim).toFixed(1),
+        spray_accuracy: (avg(m.spray_accuracy) * 100).toFixed(1),
+        ct_leetify_rating: avg(m.ct_leetify_rating).toFixed(4),
+        t_leetify_rating: avg(m.t_leetify_rating).toFixed(4),
+        reaction_time: recentByMap[m.map]
+          ? (recentByMap[m.map].reduce((a, b) => a + b, 0) / recentByMap[m.map].length).toFixed(0)
+          : null,
+        count: m.count
       }
-      acc[mapShort].kd.push(me.kd_ratio ?? 0)
-      acc[mapShort].dpr.push(me.dpr ?? 0)
-      acc[mapShort].hs_kills.push(me.total_hs_kills ?? 0)
-      acc[mapShort].trade_kill.push(me.trade_kills_success_percentage ?? 0)
-      acc[mapShort].preaim.push(me.preaim ?? 0)
-      acc[mapShort].spray_accuracy.push(me.spray_accuracy ?? 0)
-      acc[mapShort].ct_leetify_rating.push(me.ct_leetify_rating ?? 0)
-      acc[mapShort].t_leetify_rating.push(me.t_leetify_rating ?? 0)
-      acc[mapShort].count++
-      return acc
-    }, {})
-  ).map(m => {
-    const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length
-    return {
-      map: m.map,
-      kd: avg(m.kd).toFixed(2),
-      dpr: avg(m.dpr).toFixed(1),
-      hs_kills: avg(m.hs_kills).toFixed(1),
-      trade_kill: (avg(m.trade_kill) * 100).toFixed(1),
-      preaim: avg(m.preaim).toFixed(1),
-      spray_accuracy: (avg(m.spray_accuracy) * 100).toFixed(1),
-      ct_leetify_rating: avg(m.ct_leetify_rating).toFixed(4),
-      t_leetify_rating: avg(m.t_leetify_rating).toFixed(4),
-      reaction_time: recentByMap[m.map]
-        ? (recentByMap[m.map].reduce((a, b) => a + b, 0) / recentByMap[m.map].length).toFixed(0)
-        : null,
-      count: m.count
-    }
-  }).sort((a, b) => b.count - a.count) : []
+    }).sort((a, b) => b.count - a.count)
+  }, [matchesData])
 
   // gets unique maps played and match count for the map grid
-  const uniqueMaps = matchesData ? [...new Set(matchesData.map(m => m.map_name))]
-    .map(mapName => ({
-      mapName,
-      mapShort: mapName.replace("de_", "").replace("cs_", ""),
-      count: matchesData.filter(m => m.map_name === mapName).length
-    }))
-    .sort((a, b) => b.count - a.count) : []
+  const uniqueMaps = useMemo(() => {
+    if (!matchesData) return []
+    return [...new Set(matchesData.map(m => m.map_name))]
+      .map(mapName => ({
+        mapName,
+        mapShort: mapName.replace("de_", "").replace("cs_", ""),
+        count: matchesData.filter(m => m.map_name === mapName).length
+      }))
+      .sort((a, b) => b.count - a.count)
+  }, [matchesData])
 
-  // gets all matches for a specific map with full stats
-  const getMatchesForMap = (mapName) => {
-    return matchesData
-      ?.filter(m => m.map_name === mapName)
-      .map(match => {
-        const me = match.stats?.find(p => p.steam64_id === "76561198190351278")
-        const myTeam = me?.initial_team_number
-        const myScore = match.team_scores?.find(t => t.team_number === myTeam)?.score ?? 0
-        const oppScore = match.team_scores?.find(t => t.team_number !== myTeam)?.score ?? 0
-        return {
-          id: match.id,
-          date: new Date(match.finished_at).toLocaleDateString(),
-          result: myScore > oppScore ? "W" : myScore < oppScore ? "L" : "T",
-          score: `${myScore} - ${oppScore}`,
-          kills: me?.total_kills ?? "—",
-          deaths: me?.total_deaths ?? "—",
-          kd: me?.kd_ratio?.toFixed(2) ?? "—",
-          dpr: me?.dpr?.toFixed(1) ?? "—",
-          hs_kills: me?.total_hs_kills ?? "—",
-          trade_kill: me?.trade_kills_success_percentage != null ? `${(me.trade_kills_success_percentage * 100).toFixed(1)}%` : "—",
-          counter_strafing: me?.counter_strafing_shots_good_ratio != null ? `${(me.counter_strafing_shots_good_ratio * 100).toFixed(1)}%` : "—",
-          reaction_time: me?.reaction_time != null ? `${(me.reaction_time * 1000).toFixed(0)}ms` : "—",
-          preaim: me?.preaim != null ? `${me.preaim.toFixed(1)}%` : "—",
-          spray_accuracy: me?.spray_accuracy != null ? `${(me.spray_accuracy * 100).toFixed(1)}%` : "—",
-          ct_leetify_rating: me?.ct_leetify_rating?.toFixed(4) ?? "—",
-          t_leetify_rating: me?.t_leetify_rating?.toFixed(4) ?? "—",
-        }
-      }) ?? []
-  }
+  // FIX: memoized per-map match lookup, uses VITE_STEAM_ID consistently
+  const matchesByMap = useMemo(() => {
+    if (!matchesData) return {}
+    const result = {}
+    matchesData.forEach(match => {
+      const mapName = match.map_name
+      const me = match.stats?.find(p => p.steam64_id === import.meta.env.VITE_STEAM_ID)
+      const myTeam = me?.initial_team_number
+      const myScore = match.team_scores?.find(t => t.team_number === myTeam)?.score ?? 0
+      const oppScore = match.team_scores?.find(t => t.team_number !== myTeam)?.score ?? 0
+      const row = {
+        id: match.id,
+        date: new Date(match.finished_at).toLocaleDateString(),
+        result: myScore > oppScore ? "W" : myScore < oppScore ? "L" : "T",
+        score: `${myScore} - ${oppScore}`,
+        kills: me?.total_kills ?? "—",
+        deaths: me?.total_deaths ?? "—",
+        kd: me?.kd_ratio?.toFixed(2) ?? "—",
+        dpr: me?.dpr?.toFixed(1) ?? "—",
+        hs_kills: me?.total_hs_kills ?? "—",
+        trade_kill: me?.trade_kills_success_percentage != null ? `${(me.trade_kills_success_percentage * 100).toFixed(1)}%` : "—",
+        counter_strafing: me?.counter_strafing_shots_good_ratio != null ? `${(me.counter_strafing_shots_good_ratio * 100).toFixed(1)}%` : "—",
+        reaction_time: me?.reaction_time != null ? `${(me.reaction_time * 1000).toFixed(0)}ms` : "—",
+        preaim: me?.preaim != null ? `${me.preaim.toFixed(1)}%` : "—",
+        spray_accuracy: me?.spray_accuracy != null ? `${(me.spray_accuracy * 100).toFixed(1)}%` : "—",
+        ct_leetify_rating: me?.ct_leetify_rating?.toFixed(4) ?? "—",
+        t_leetify_rating: me?.t_leetify_rating?.toFixed(4) ?? "—",
+      }
+      if (!result[mapName]) result[mapName] = []
+      result[mapName].push(row)
+    })
+    return result
+  }, [matchesData])
 
   // All matches across every map for the "All" history mode
-  const allMatches = matchesData ? matchesData.map(match => {
-    const me = match.stats?.find(p => p.steam64_id === import.meta.env.VITE_STEAM_ID)
-    const myTeam = me?.initial_team_number
-    const myScore = match.team_scores?.find(t => t.team_number === myTeam)?.score ?? 0
-    const oppScore = match.team_scores?.find(t => t.team_number !== myTeam)?.score ?? 0
-    return {
-      id: match.id,
-      date: new Date(match.finished_at).toLocaleDateString(),
-      map: match.map_name?.replace("de_", "").replace("cs_", ""),
-      result: myScore > oppScore ? "W" : myScore < oppScore ? "L" : "T",
-      score: `${myScore} - ${oppScore}`,
-      kills: me?.total_kills ?? "—",
-      deaths: me?.total_deaths ?? "—",
-      kd: me?.kd_ratio?.toFixed(2) ?? "—",
-      dpr: me?.dpr?.toFixed(1) ?? "—",
-      hs_kills: me?.total_hs_kills ?? "—",
-      trade_kill: me?.trade_kills_success_percentage != null ? `${(me.trade_kills_success_percentage * 100).toFixed(1)}%` : "—",
-      counter_strafing: me?.counter_strafing_shots_good_ratio != null ? `${(me.counter_strafing_shots_good_ratio * 100).toFixed(1)}%` : "—",
-      reaction_time: me?.reaction_time != null ? `${(me.reaction_time * 1000).toFixed(0)}ms` : "—",
-      preaim: me?.preaim != null ? `${me.preaim.toFixed(1)}%` : "—",
-      spray_accuracy: me?.spray_accuracy != null ? `${(me.spray_accuracy * 100).toFixed(1)}%` : "—",
-      ct_leetify_rating: me?.ct_leetify_rating?.toFixed(4) ?? "—",
-      t_leetify_rating: me?.t_leetify_rating?.toFixed(4) ?? "—",
-    }
-  }) : []
+  const allMatches = useMemo(() => {
+    if (!matchesData) return []
+    return matchesData.map(match => {
+      const me = match.stats?.find(p => p.steam64_id === import.meta.env.VITE_STEAM_ID)
+      const myTeam = me?.initial_team_number
+      const myScore = match.team_scores?.find(t => t.team_number === myTeam)?.score ?? 0
+      const oppScore = match.team_scores?.find(t => t.team_number !== myTeam)?.score ?? 0
+      return {
+        id: match.id,
+        date: new Date(match.finished_at).toLocaleDateString(),
+        map: match.map_name?.replace("de_", "").replace("cs_", ""),
+        result: myScore > oppScore ? "W" : myScore < oppScore ? "L" : "T",
+        score: `${myScore} - ${oppScore}`,
+        kills: me?.total_kills ?? "—",
+        deaths: me?.total_deaths ?? "—",
+        kd: me?.kd_ratio?.toFixed(2) ?? "—",
+        dpr: me?.dpr?.toFixed(1) ?? "—",
+        hs_kills: me?.total_hs_kills ?? "—",
+        trade_kill: me?.trade_kills_success_percentage != null ? `${(me.trade_kills_success_percentage * 100).toFixed(1)}%` : "—",
+        counter_strafing: me?.counter_strafing_shots_good_ratio != null ? `${(me.counter_strafing_shots_good_ratio * 100).toFixed(1)}%` : "—",
+        reaction_time: me?.reaction_time != null ? `${(me.reaction_time * 1000).toFixed(0)}ms` : "—",
+        preaim: me?.preaim != null ? `${me.preaim.toFixed(1)}%` : "—",
+        spray_accuracy: me?.spray_accuracy != null ? `${(me.spray_accuracy * 100).toFixed(1)}%` : "—",
+        ct_leetify_rating: me?.ct_leetify_rating?.toFixed(4) ?? "—",
+        t_leetify_rating: me?.t_leetify_rating?.toFixed(4) ?? "—",
+      }
+    })
+  }, [matchesData])
 
   // Shared Y-axis domain for CT/T rating charts so both scales match
-  const ctTValues = [
-    ...(myStats?.map(m => m.ct_leetify_rating).filter(v => v != null) ?? []),
-    ...(myStats?.map(m => m.t_leetify_rating).filter(v => v != null) ?? []),
-    ...(mapStats.map(m => parseFloat(m.ct_leetify_rating)).filter(v => !isNaN(v))),
-    ...(mapStats.map(m => parseFloat(m.t_leetify_rating)).filter(v => !isNaN(v))),
-  ]
-  const ctTMin = ctTValues.length ? parseFloat((Math.min(...ctTValues) * 1.1).toFixed(4)) : "auto"
-  const ctTMax = ctTValues.length ? parseFloat((Math.max(...ctTValues) * 1.1).toFixed(4)) : "auto"
-  const ctTDomain = [ctTMin, ctTMax]
+  const ctTDomain = useMemo(() => {
+    const values = [
+      ...(myStats?.map(m => m.ct_leetify_rating).filter(v => v != null) ?? []),
+      ...(myStats?.map(m => m.t_leetify_rating).filter(v => v != null) ?? []),
+      ...(mapStats.map(m => parseFloat(m.ct_leetify_rating)).filter(v => !isNaN(v))),
+      ...(mapStats.map(m => parseFloat(m.t_leetify_rating)).filter(v => !isNaN(v))),
+    ]
+    if (!values.length) return ["auto", "auto"]
+    return [
+      parseFloat((Math.min(...values) * 1.1).toFixed(4)),
+      parseFloat((Math.max(...values) * 1.1).toFixed(4))
+    ]
+  }, [myStats, mapStats])
 
-  if (error) return <div className={styles.container}><p>{error}</p></div>
-  if (!data) return <div className={styles.container}><p>Loading...</p></div>
-  if (!matchesData) return <div className={styles.container}><p>Loading matches...</p></div>
+  if (loading) return <div className={styles.container}><LoadingSpinner text="Loading CS2 stats..." /></div>
+  if (error) return <div className={styles.container}><p style={{ color: "#e57373", padding: "2rem" }}>{error}</p></div>
+  if (!data || !matchesData) return <div className={styles.container}><LoadingSpinner text="Loading CS2 stats..." /></div>
 
   const { ranks, rating, stats, name, winrate, total_matches, recent_matches } = data
   const { aim, positioning, utility, clutch, opening } = rating ?? {}
@@ -433,7 +482,6 @@ export default function CS2() {
             </div>
           </section>
 
-          {/* NEW: Spray Accuracy */}
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>Spray Accuracy Per Match</h2>
             <div style={{ width: "100%", height: 300 }}>
@@ -457,7 +505,6 @@ export default function CS2() {
             </div>
           </section>
 
-          {/* NEW: CT vs T Leetify Rating */}
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>CT vs T Leetify Rating Per Match</h2>
             <div style={{ width: "100%", height: 300 }}>
@@ -477,7 +524,6 @@ export default function CS2() {
                   />
                   <Line type="monotone" dataKey="ct_leetify_rating" stroke="#6499dbff" strokeWidth={2} dot={{ fill: "#6074c4ff", r: 3 }} activeDot={{ r: 6, fill: "#0c00eaff" }} name="ct_leetify_rating" />
                   <Line type="monotone" dataKey="t_leetify_rating" stroke="#e78f5cff" strokeWidth={2} dot={{ fill: "#fc642cff", r: 3 }} activeDot={{ r: 6, fill: "#dd4b02ff" }} name="t_leetify_rating" />
-
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -540,9 +586,9 @@ export default function CS2() {
       {/* Match History View */}
       {view === "history" && (
         <>
-          {/* Slider toggle */}
+          {/* FIX: correct label colors — By Map uses byMap condition, All Matches uses all condition */}
           <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "2rem" }}>
-            <span className={styles.toggleLabel} style={{ color: historyMode === "all" ? "var(--text-primary)" : "var(--text-muted)" }}>By Map</span>
+            <span className={styles.toggleLabel} style={{ color: historyMode === "byMap" ? "var(--text-primary)" : "var(--text-muted)" }}>By Map</span>
             <button
               className={`${styles.sliderToggle} ${historyMode === "byMap" ? styles.sliderToggleRight : ""}`}
               onClick={() => { setHistoryMode(prev => prev === "byMap" ? "all" : "byMap"); setSelectedMap(null) }}
@@ -573,13 +619,12 @@ export default function CS2() {
                   </div>
                 </section>
               )}
-
               {selectedMap && (
                 <section className={styles.section}>
                   <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1.5rem" }}>
                     <button className={styles.button} onClick={() => setSelectedMap(null)}>← Back</button>
                     <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
-                      {selectedMap.replace("de_", "").replace("cs_", "")} — {getMatchesForMap(selectedMap).length} Matches
+                      {selectedMap.replace("de_", "").replace("cs_", "")} — {matchesByMap[selectedMap]?.length ?? 0} Matches
                     </h2>
                   </div>
                   <div style={{ overflowX: "auto" }}>
@@ -604,7 +649,7 @@ export default function CS2() {
                         </tr>
                       </thead>
                       <tbody>
-                        {getMatchesForMap(selectedMap).map((match) => (
+                        {(matchesByMap[selectedMap] ?? []).map((match) => (
                           <tr key={match.id} className={styles.matchTableRow}>
                             <td className={styles.matchTableTd}>{match.date}</td>
                             <td className={styles.matchTableTd}>
@@ -695,6 +740,7 @@ export default function CS2() {
   )
 }
 
+// Gives color styling based on performance rating
 function StatCard({ label, value, rating }) {
   const tierClass = rating === "excellent" ? styles.excellent
     : rating === "good" ? styles.good

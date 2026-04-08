@@ -1,5 +1,8 @@
+/* Navbar.jsx */
+
 import { Link } from "react-router-dom"
 import styles from "../styles/Navbar.module.css"
+import { Settings } from "lucide-react"
 
 export default function Navbar() {
   return (
@@ -13,6 +16,9 @@ export default function Navbar() {
       <Link to="/clothing" className={styles.link}>Clothing</Link>
       <Link to="/watches" className={styles.link}>Watches</Link>
       <Link to="/workout" className={styles.link}>Workout</Link>
+      <Link to="/settings" className={styles.settingsLink} aria-label="Settings">
+        <Settings size={20} />
+      </Link>
     </nav>
   )
 }

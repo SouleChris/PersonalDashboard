@@ -8,6 +8,7 @@ Uses Supabase via backend endpoints for persistent storage
 import { useState, useEffect, useMemo } from "react"
 import styles from "../styles/finances.module.css"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts"
+import LoadingSpinner from "../components/loadSpinner"
 
 const CATEGORIES = ["Restaurant", "Grocery", "Gas", "Clothing", "Home", "Personal Product", "Car", "Beer", "Transportation", "Videogame", "Other"]
 const CATEGORY_COLORS = {
@@ -22,24 +23,20 @@ const EMPTY_TX_FORM = { account_id: "", business: "", amount: "", date: new Date
 const EMPTY_SUB_FORM = { name: "", cost: "", cycle: "monthly", next_date: "", category: "", notes: "" }
 const EMPTY_ACCOUNT_FORM = { name: "", type: "checking", balance: "" }
 
-// How many days ahead counts as "due soon"
 const DUE_SOON_DAYS = 7
 
 export default function Finances() {
   const [view, setView] = useState("summary")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  // Inline action error — shown as a banner without replacing the whole page
   const [actionError, setActionError] = useState(null)
 
-  // ── State ─────────────────────────────────────────────────
   const [accounts, setAccounts] = useState([])
   const [transactions, setTransactions] = useState([])
   const [subscriptions, setSubscriptions] = useState([])
   const [budgets, setBudgets] = useState({})
 
   const [selectedAccount, setSelectedAccount] = useState(null)
-  // Month filter for transactions (null = all)
   const [txMonthFilter, setTxMonthFilter] = useState(null)
 
   const [editingTx, setEditingTx] = useState(null)
@@ -56,6 +53,8 @@ export default function Finances() {
   const [accountForm, setAccountForm] = useState(EMPTY_ACCOUNT_FORM)
   const [subForm, setSubForm] = useState(EMPTY_SUB_FORM)
   const [budgetInput, setBudgetInput] = useState("")
+
+  const currentMonthKey = `${new Date().getFullYear()}-${new Date().getMonth()}`
 
   // ── Load all data from Supabase on mount ──────────────────
   useEffect(() => {
@@ -136,6 +135,13 @@ export default function Finances() {
   }
 
   const handleDeleteAccount = async (id) => {
+    const account = accounts.find(a => a.id === id)
+    const txCount = transactions.filter(t => t.account_id === id).length
+    const confirmMsg = txCount > 0
+      ? `Delete "${account?.name}"? This will also permanently delete ${txCount} transaction${txCount !== 1 ? "s" : ""} linked to this account.`
+      : `Delete "${account?.name}"?`
+    if (!window.confirm(confirmMsg)) return
+
     setActionError(null)
     try {
       const res = await fetch(`/finance/accounts/${id}`, { method: "DELETE" })
@@ -144,7 +150,6 @@ export default function Finances() {
         throw new Error(err.error || "Failed to delete account")
       }
       setAccounts(prev => prev.filter(a => a.id !== id))
-      // Transactions are cascade deleted in Supabase, remove from local state too
       setTransactions(prev => prev.filter(t => t.account_id !== id))
       if (selectedAccount === id) setSelectedAccount(null)
     } catch (err) {
@@ -179,11 +184,15 @@ export default function Finances() {
       }
       const saved = await res.json()
       setTransactions(prev => [saved, ...prev])
-      await fetch(`/finance/accounts/${txForm.account_id}`, {
+      const balRes = await fetch(`/finance/accounts/${txForm.account_id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ balance: newBalance })
       })
+      if (!balRes.ok) {
+        const err = await balRes.json()
+        throw new Error(err.error || "Failed to update account balance")
+      }
       setAccounts(prev => prev.map(a => a.id === txForm.account_id ? { ...a, balance: newBalance } : a))
       setTxForm(EMPTY_TX_FORM)
       setShowTxForm(false)
@@ -216,26 +225,26 @@ export default function Finances() {
         throw new Error(err.error || "Failed to update transaction")
       }
       setTransactions(prev => prev.map(t => t.id === editingTx ? updatedTx : t))
-      // FIX: correctly recalculate balance by reversing the old transaction
-      // then applying the new one, rather than stacking deltas on top of each other
       if (oldTx?.account_id) {
         const account = accounts.find(a => a.id === oldTx.account_id)
         const currentBalance = account?.balance ?? 0
-        // Step 1: reverse the old transaction's effect on the balance
         const balanceWithoutOld = oldTx.tx_type === "credit"
           ? currentBalance - oldTx.amount
           : currentBalance + oldTx.amount
-        // Step 2: apply the new transaction
         const newBalance = parseFloat((
           txForm.tx_type === "credit"
             ? balanceWithoutOld + newAmount
             : balanceWithoutOld - newAmount
         ).toFixed(2))
-        await fetch(`/finance/accounts/${oldTx.account_id}`, {
+        const balRes = await fetch(`/finance/accounts/${oldTx.account_id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ balance: newBalance })
         })
+        if (!balRes.ok) {
+          const err = await balRes.json()
+          throw new Error(err.error || "Failed to update account balance")
+        }
         setAccounts(prev => prev.map(a => a.id === oldTx.account_id ? { ...a, balance: newBalance } : a))
       }
       setTxForm(EMPTY_TX_FORM)
@@ -261,11 +270,15 @@ export default function Finances() {
         const delta = tx.tx_type === "credit" ? -tx.amount : tx.amount
         const account = accounts.find(a => a.id === tx.account_id)
         const newBalance = parseFloat(((account?.balance ?? 0) + delta).toFixed(2))
-        await fetch(`/finance/accounts/${tx.account_id}`, {
+        const balRes = await fetch(`/finance/accounts/${tx.account_id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ balance: newBalance })
         })
+        if (!balRes.ok) {
+          const err = await balRes.json()
+          throw new Error(err.error || "Failed to update account balance")
+        }
         setAccounts(prev => prev.map(a => a.id === tx.account_id ? { ...a, balance: newBalance } : a))
       }
     } catch (err) {
@@ -341,8 +354,6 @@ export default function Finances() {
   }
 
   // ── Budget Handlers ───────────────────────────────────────
-  const currentMonthKey = `${new Date().getFullYear()}-${new Date().getMonth()}`
-
   const handleSaveBudget = async () => {
     setActionError(null)
     const amount = parseFloat(budgetInput) || 0
@@ -426,7 +437,6 @@ export default function Finances() {
     total: transactions.filter(t => t.account_id === a.id && t.tx_type !== "credit").reduce((sum, t) => sum + t.amount, 0)
   })), [accounts, transactions])
 
-  // Subscriptions due within DUE_SOON_DAYS days
   const dueSoonSubs = useMemo(() => {
     const now = new Date()
     const cutoff = new Date()
@@ -440,14 +450,13 @@ export default function Finances() {
 
   const selectedAccountObj = accounts.find(a => a.id === txForm.account_id)
 
-  if (loading) return <div className={styles.container}><p>Loading finances...</p></div>
-  if (error) return <div className={styles.container}><p style={{ color: "#e57373" }}>{error}</p></div>
+  if (loading) return <div className={styles.container}><LoadingSpinner text="Loading finances..." /></div>
+  if (error) return <div className={styles.container}><p style={{ color: "#e57373", padding: "2rem" }}>{error}</p></div>
 
   return (
     <div className={styles.container}>
       <h1 className={styles.title}>Finances</h1>
 
-      {/* Inline action error banner — doesn't replace the whole page */}
       {actionError && (
         <div style={{ background: "#fff3f3", border: "1px solid #e57373", borderRadius: "8px", padding: "0.75rem 1rem", marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <p style={{ color: "#e57373", margin: 0, fontSize: "0.85rem" }}>{actionError}</p>
@@ -455,7 +464,6 @@ export default function Finances() {
         </div>
       )}
 
-      {/* Nav */}
       <div className={styles.nav}>
         {["summary", "transactions", "accounts", "subscriptions", "overview"].map(v => (
           <button key={v} onClick={() => setView(v)} className={view === v ? styles.activeButton : styles.button}>
@@ -464,7 +472,6 @@ export default function Finances() {
         ))}
       </div>
 
-      {/* ── SUMMARY ── */}
       {view === "summary" && (
         <>
           <div className={styles.cardGrid}>
@@ -484,7 +491,6 @@ export default function Finances() {
             </div>
           </div>
 
-          {/* Due soon warning */}
           {dueSoonSubs.length > 0 && (
             <div style={{ background: "#fffbea", border: "1px solid #f5c842", borderRadius: "8px", padding: "0.75rem 1rem", marginBottom: "1rem" }}>
               <p style={{ margin: "0 0 0.4rem 0", fontSize: "0.78rem", fontWeight: 700, color: "#b7860b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
@@ -518,42 +524,26 @@ export default function Finances() {
         </>
       )}
 
-      {/* ── TRANSACTIONS ── */}
       {view === "transactions" && (
         <div className={styles.txLayout}>
           <div className={styles.txSidebar}>
             <p className={styles.sectionTitle}>Accounts</p>
-            <div
-              className={`${styles.sidebarItem} ${!selectedAccount ? styles.sidebarItemActive : ""}`}
-              onClick={() => setSelectedAccount(null)}
-            >
+            <div className={`${styles.sidebarItem} ${!selectedAccount ? styles.sidebarItemActive : ""}`} onClick={() => setSelectedAccount(null)}>
               All accounts
             </div>
             {accounts.map(a => (
-              <div
-                key={a.id}
-                className={`${styles.sidebarItem} ${selectedAccount === a.id ? styles.sidebarItemActive : ""}`}
-                onClick={() => setSelectedAccount(a.id)}
-              >
+              <div key={a.id} className={`${styles.sidebarItem} ${selectedAccount === a.id ? styles.sidebarItemActive : ""}`} onClick={() => setSelectedAccount(a.id)}>
                 <span>{a.name}</span>
                 <span className={styles.sidebarType}>{a.type}</span>
               </div>
             ))}
 
-            {/* Month filter */}
             <p className={styles.sectionTitle} style={{ marginTop: "1.5rem" }}>Filter by Month</p>
-            <div
-              className={`${styles.sidebarItem} ${txMonthFilter === null ? styles.sidebarItemActive : ""}`}
-              onClick={() => setTxMonthFilter(null)}
-            >
+            <div className={`${styles.sidebarItem} ${txMonthFilter === null ? styles.sidebarItemActive : ""}`} onClick={() => setTxMonthFilter(null)}>
               All months
             </div>
             {MONTHS.map((m, i) => (
-              <div
-                key={i}
-                className={`${styles.sidebarItem} ${txMonthFilter === i ? styles.sidebarItemActive : ""}`}
-                onClick={() => setTxMonthFilter(i)}
-              >
+              <div key={i} className={`${styles.sidebarItem} ${txMonthFilter === i ? styles.sidebarItemActive : ""}`} onClick={() => setTxMonthFilter(i)}>
                 {m}
               </div>
             ))}
@@ -586,16 +576,9 @@ export default function Finances() {
                   </div>
                   <div className={styles.formGroup}>
                     <label className={styles.label}>Type</label>
-                    <select
-                      className={styles.input}
-                      value={txForm.tx_type}
-                      onChange={e => setTxForm(f => ({ ...f, tx_type: e.target.value }))}
-                      disabled={selectedAccountObj?.type === "credit"}
-                    >
+                    <select className={styles.input} value={txForm.tx_type} onChange={e => setTxForm(f => ({ ...f, tx_type: e.target.value }))} disabled={selectedAccountObj?.type === "credit"}>
                       <option value="debit">Debit (money out)</option>
-                      {selectedAccountObj?.type !== "credit" && (
-                        <option value="credit">Credit (money in)</option>
-                      )}
+                      {selectedAccountObj?.type !== "credit" && <option value="credit">Credit (money in)</option>}
                     </select>
                   </div>
                   <div className={styles.formGroup}>
@@ -680,7 +663,6 @@ export default function Finances() {
         </div>
       )}
 
-      {/* ── ACCOUNTS ── */}
       {view === "accounts" && (
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
@@ -770,7 +752,6 @@ export default function Finances() {
         </section>
       )}
 
-      {/* ── SUBSCRIPTIONS ── */}
       {view === "subscriptions" && (
         <>
           <div className={styles.sectionHeader}>
@@ -783,7 +764,6 @@ export default function Finances() {
             </button>
           </div>
 
-          {/* Due soon warning on subscriptions page */}
           {dueSoonSubs.length > 0 && (
             <div style={{ background: "#fffbea", border: "1px solid #f5c842", borderRadius: "8px", padding: "0.75rem 1rem", marginBottom: "1rem" }}>
               <p style={{ margin: "0 0 0.4rem 0", fontSize: "0.78rem", fontWeight: 700, color: "#b7860b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
@@ -801,14 +781,8 @@ export default function Finances() {
             <div className={styles.form}>
               <h3 className={styles.formTitle}>Add Subscription</h3>
               <div className={styles.formGrid}>
-                <div className={styles.formGroup}>
-                  <label className={styles.label}>Name *</label>
-                  <input className={styles.input} placeholder="e.g. Netflix" value={subForm.name} onChange={e => setSubForm(f => ({ ...f, name: e.target.value }))} />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.label}>Cost *</label>
-                  <input className={styles.input} type="number" placeholder="0.00" value={subForm.cost} onChange={e => setSubForm(f => ({ ...f, cost: e.target.value }))} />
-                </div>
+                <div className={styles.formGroup}><label className={styles.label}>Name *</label><input className={styles.input} placeholder="e.g. Netflix" value={subForm.name} onChange={e => setSubForm(f => ({ ...f, name: e.target.value }))} /></div>
+                <div className={styles.formGroup}><label className={styles.label}>Cost *</label><input className={styles.input} type="number" placeholder="0.00" value={subForm.cost} onChange={e => setSubForm(f => ({ ...f, cost: e.target.value }))} /></div>
                 <div className={styles.formGroup}>
                   <label className={styles.label}>Billing Cycle</label>
                   <select className={styles.input} value={subForm.cycle} onChange={e => setSubForm(f => ({ ...f, cycle: e.target.value }))}>
@@ -816,18 +790,9 @@ export default function Finances() {
                     <option value="yearly">Yearly</option>
                   </select>
                 </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.label}>Next Billing Date</label>
-                  <input className={styles.input} type="date" value={subForm.next_date} onChange={e => setSubForm(f => ({ ...f, next_date: e.target.value }))} />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.label}>Category</label>
-                  <input className={styles.input} placeholder="e.g. Entertainment" value={subForm.category} onChange={e => setSubForm(f => ({ ...f, category: e.target.value }))} />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.label}>Notes</label>
-                  <input className={styles.input} placeholder="Optional" value={subForm.notes} onChange={e => setSubForm(f => ({ ...f, notes: e.target.value }))} />
-                </div>
+                <div className={styles.formGroup}><label className={styles.label}>Next Billing Date</label><input className={styles.input} type="date" value={subForm.next_date} onChange={e => setSubForm(f => ({ ...f, next_date: e.target.value }))} /></div>
+                <div className={styles.formGroup}><label className={styles.label}>Category</label><input className={styles.input} placeholder="e.g. Entertainment" value={subForm.category} onChange={e => setSubForm(f => ({ ...f, category: e.target.value }))} /></div>
+                <div className={styles.formGroup}><label className={styles.label}>Notes</label><input className={styles.input} placeholder="Optional" value={subForm.notes} onChange={e => setSubForm(f => ({ ...f, notes: e.target.value }))} /></div>
               </div>
               <button className={styles.submitButton} onClick={handleAddSub}>Add Subscription</button>
             </div>
@@ -843,14 +808,8 @@ export default function Finances() {
                   {editingSub === s.id ? (
                     <div style={{ flex: 1 }}>
                       <div className={styles.formGrid}>
-                        <div className={styles.formGroup}>
-                          <label className={styles.label}>Name</label>
-                          <input className={styles.input} value={editingSubForm.name} onChange={e => setEditingSubForm(f => ({ ...f, name: e.target.value }))} />
-                        </div>
-                        <div className={styles.formGroup}>
-                          <label className={styles.label}>Cost</label>
-                          <input className={styles.input} type="number" value={editingSubForm.cost} onChange={e => setEditingSubForm(f => ({ ...f, cost: e.target.value }))} />
-                        </div>
+                        <div className={styles.formGroup}><label className={styles.label}>Name</label><input className={styles.input} value={editingSubForm.name} onChange={e => setEditingSubForm(f => ({ ...f, name: e.target.value }))} /></div>
+                        <div className={styles.formGroup}><label className={styles.label}>Cost</label><input className={styles.input} type="number" value={editingSubForm.cost} onChange={e => setEditingSubForm(f => ({ ...f, cost: e.target.value }))} /></div>
                         <div className={styles.formGroup}>
                           <label className={styles.label}>Billing Cycle</label>
                           <select className={styles.input} value={editingSubForm.cycle} onChange={e => setEditingSubForm(f => ({ ...f, cycle: e.target.value }))}>
@@ -858,18 +817,9 @@ export default function Finances() {
                             <option value="yearly">Yearly</option>
                           </select>
                         </div>
-                        <div className={styles.formGroup}>
-                          <label className={styles.label}>Next Billing Date</label>
-                          <input className={styles.input} type="date" value={editingSubForm.next_date} onChange={e => setEditingSubForm(f => ({ ...f, next_date: e.target.value }))} />
-                        </div>
-                        <div className={styles.formGroup}>
-                          <label className={styles.label}>Category</label>
-                          <input className={styles.input} value={editingSubForm.category} onChange={e => setEditingSubForm(f => ({ ...f, category: e.target.value }))} />
-                        </div>
-                        <div className={styles.formGroup}>
-                          <label className={styles.label}>Notes</label>
-                          <input className={styles.input} value={editingSubForm.notes} onChange={e => setEditingSubForm(f => ({ ...f, notes: e.target.value }))} />
-                        </div>
+                        <div className={styles.formGroup}><label className={styles.label}>Next Billing Date</label><input className={styles.input} type="date" value={editingSubForm.next_date} onChange={e => setEditingSubForm(f => ({ ...f, next_date: e.target.value }))} /></div>
+                        <div className={styles.formGroup}><label className={styles.label}>Category</label><input className={styles.input} value={editingSubForm.category} onChange={e => setEditingSubForm(f => ({ ...f, category: e.target.value }))} /></div>
+                        <div className={styles.formGroup}><label className={styles.label}>Notes</label><input className={styles.input} value={editingSubForm.notes} onChange={e => setEditingSubForm(f => ({ ...f, notes: e.target.value }))} /></div>
                       </div>
                       <div style={{ display: "flex", gap: "0.5rem" }}>
                         <button className={styles.submitButton} onClick={handleSaveEditSub}>Save</button>
@@ -906,7 +856,6 @@ export default function Finances() {
         </>
       )}
 
-      {/* ── OVERVIEW ── */}
       {view === "overview" && (
         <div className={styles.overviewLayout}>
           <div className={styles.overviewStats}>
@@ -952,10 +901,7 @@ export default function Finances() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#eeeeee" />
                   <XAxis dataKey="month" tick={{ fill: "#888", fontSize: 12 }} />
                   <YAxis tick={{ fill: "#888", fontSize: 12 }} tickFormatter={v => `$${v}`} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "#fff", border: "1px solid #eeeeee", borderRadius: "8px" }}
-                    formatter={v => [`$${v.toFixed(2)}`, "Spending"]}
-                  />
+                  <Tooltip contentStyle={{ backgroundColor: "#fff", border: "1px solid #eeeeee", borderRadius: "8px" }} formatter={v => [`$${v.toFixed(2)}`, "Spending"]} />
                   <Bar dataKey="total" radius={[4, 4, 0, 0]}>
                     {monthlySpending.map((entry, i) => (
                       <Cell key={i} fill={i === new Date().getMonth() ? "#a8b8a0" : "#e0e8dc"} />
@@ -975,20 +921,14 @@ export default function Finances() {
                   <PieChart>
                     <Pie data={categorySpending} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100}
                       label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                      {categorySpending.map((entry, i) => (
-                        <Cell key={i} fill={entry.fill} />
-                      ))}
+                      {categorySpending.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
                     </Pie>
-                    <Tooltip
-                      contentStyle={{ backgroundColor: "#fff", border: "1px solid #eeeeee", borderRadius: "8px" }}
-                      formatter={v => [`$${v.toFixed(2)}`]}
-                    />
+                    <Tooltip contentStyle={{ backgroundColor: "#fff", border: "1px solid #eeeeee", borderRadius: "8px" }} formatter={v => [`$${v.toFixed(2)}`]} />
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>
               )}
             </div>
-
             <div className={styles.overviewChartCard}>
               <p className={styles.overviewChartTitle}>Spending by account</p>
               {accountSpending.length === 0 && <p className={styles.empty}>No accounts yet.</p>}
@@ -998,10 +938,7 @@ export default function Finances() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#eeeeee" horizontal={false} />
                     <XAxis type="number" tick={{ fill: "#888", fontSize: 11 }} tickFormatter={v => `$${v}`} />
                     <YAxis type="category" dataKey="name" tick={{ fill: "#888", fontSize: 11 }} width={100} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: "#fff", border: "1px solid #eeeeee", borderRadius: "8px" }}
-                      formatter={v => [`$${v.toFixed(2)}`, "Spent"]}
-                    />
+                    <Tooltip contentStyle={{ backgroundColor: "#fff", border: "1px solid #eeeeee", borderRadius: "8px" }} formatter={v => [`$${v.toFixed(2)}`, "Spent"]} />
                     <Bar dataKey="total" fill="#a8b8a0" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
