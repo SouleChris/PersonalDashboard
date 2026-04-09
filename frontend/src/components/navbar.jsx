@@ -14,7 +14,7 @@ export default function Navbar() {
       <Link to="/counterstrike" className={styles.link}>Counterstrike</Link>
       <Link to="/finances" className={styles.link}>Finances</Link>
       <Link to="/clothing" className={styles.link}>Clothing</Link>
-      <Link to="/watches" className={styles.link}>Watches</Link>
+      <Link to="/recipes" className={styles.link}>Recipes</Link>
       <Link to="/workout" className={styles.link}>Workout</Link>
       <Link to="/settings" className={styles.settingsLink} aria-label="Settings">
         <Settings size={20} />

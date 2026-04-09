@@ -1,5 +1,4 @@
 /* App.jsx */
-
 import { BrowserRouter, Routes, Route } from "react-router-dom"
 import { useState, useEffect } from "react"
 import Footer from "./components/footer"
@@ -8,7 +7,8 @@ import Home from "./pages/home"
 import About from "./pages/about"
 import Stocks from "./pages/stocks"
 import Page4 from "./pages/clothing"
-import Page5 from "./pages/watches"
+import Recipes from "./pages/recipes"
+import RecipeDetail from "./pages/recipedetail"
 import Counterstrike from "./pages/counterstrike"
 import Finances from "./pages/finances"
 import Workout from "./pages/workout"
@@ -33,7 +33,8 @@ export default function App() {
           <Route path="/about" element={<About />} />
           <Route path="/stocks" element={<Stocks />} />
           <Route path="/clothing" element={<Page4 />} />
-          <Route path="/watches" element={<Page5 />} />
+          <Route path="/recipes" element={<Recipes />} />
+          <Route path="/recipes/:id" element={<RecipeDetail />} />
           <Route path="/counterstrike" element={<Counterstrike />} />
           <Route path="/finances" element={<Finances />} />
           <Route path="/workout" element={<Workout />} />

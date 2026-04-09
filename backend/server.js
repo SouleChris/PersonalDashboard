@@ -10,6 +10,9 @@ const API_KEY = process.env.LEETIFY_API_KEY
 const { createClient } = require("@supabase/supabase-js")
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
 
+const multer = require("multer")
+const upload = multer({ storage: multer.memoryStorage() })
+
 console.log("Supabase URL:", process.env.SUPABASE_URL)
 console.log("Supabase Key:", process.env.SUPABASE_KEY?.slice(0, 20))
 
@@ -22,6 +25,105 @@ supabase.from("accounts").select("count").then(() => {
 }).catch(() => {
   console.log("Supabase warmup failed - will retry on first request")
 })
+
+
+// ===================== Recipes =====================
+
+app.post("/recipes/upload-image", upload.single("image"), async (req, res) => {
+  try {
+    const file = req.file
+    const fileName = `${Date.now()}-${file.originalname.replace(/\s/g, "_")}`
+    const { data, error } = await supabase.storage
+      .from("recipe-images")
+      .upload(fileName, file.buffer, { contentType: file.mimetype })
+    if (error) return res.status(500).json({ error: error.message })
+    const { data: urlData } = supabase.storage
+      .from("recipe-images")
+      .getPublicUrl(fileName)
+    res.json({ url: urlData.publicUrl })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+
+app.get("/recipes", async (req, res) => {
+  const { data, error } = await supabase
+    .from("recipes")
+    .select("*")
+    .order("created_at", { ascending: false })
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
+
+app.get("/recipes/:id", async (req, res) => {
+  const { data, error } = await supabase
+    .from("recipes")
+    .select("*")
+    .eq("id", req.params.id)
+    .single()
+  if (error) return res.status(500).json({ error: error.message })
+  if (!data) return res.status(404).json({ error: "Recipe not found" })
+  res.json(data)
+})
+
+app.post("/recipes", async (req, res) => {
+  const { name, description, culture, category, image_url, cook_time,
+        price, time_of_year, servings, ingredients, instructions,
+        pairings, items_needed, blurb, meal_type } = req.body = req.body
+  const { data, error } = await supabase
+    .from("recipes")
+    .insert([{ name, description, culture, category, image_url, cook_time, price, time_of_year, ingredients, instructions, pairings, items_needed }])
+    .select()
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data[0])
+})
+
+app.patch("/recipes/:id", async (req, res) => {
+  const { name, description, culture, category, image_url, cook_time,
+        price, time_of_year, servings, ingredients, instructions,
+        pairings, items_needed, blurb, meal_type } = req.body = req.body
+  const { data, error } = await supabase
+    .from("recipes")
+    .update({ name, description, culture, category, image_url, cook_time, price, time_of_year, ingredients, instructions, pairings, items_needed })
+    .eq("id", req.params.id)
+    .select()
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data[0])
+})
+
+app.delete("/recipes/:id", async (req, res) => {
+  const { error } = await supabase
+    .from("recipes")
+    .delete()
+    .eq("id", req.params.id)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ success: true })
+})
+
+
+app.post("/recipes/upload-image", upload.single("image"), async (req, res) => {
+  try {
+    const file = req.file
+    if (!file) return res.status(400).json({ error: "No file provided" })
+    const fileName = `${Date.now()}-${file.originalname.replace(/\s/g, "_")}`
+    const { data, error } = await supabase.storage
+      .from("recipe-images")
+      .upload(fileName, file.buffer, { contentType: file.mimetype })
+    if (error) return res.status(500).json({ error: error.message })
+    const { data: urlData } = supabase.storage
+      .from("recipe-images")
+      .getPublicUrl(fileName)
+    res.json({ url: urlData.publicUrl })
+  } catch (err) {
+    console.error("Upload error:", err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ===================== End Recipes =====================
+
 
 // ===================== Workouts =====================
 app.get("/workouts", async (req, res) => {

@@ -10,6 +10,7 @@ export default defineConfig({
       '/steam': 'http://localhost:3000',
       '/finance': 'http://localhost:3000',
       '/workouts': 'http://localhost:3000',
+      '/recipes': 'http://localhost:3000',
     }
   }
 })
