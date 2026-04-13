@@ -7,9 +7,15 @@ const PORT = 3000
 
 const STEAM_ID = process.env.STEAM_ID
 const API_KEY = process.env.LEETIFY_API_KEY
+
 const { createClient } = require("@supabase/supabase-js")
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
 
+// OpenAI for recipe URL parsing
+const OpenAI = require("openai")
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+// Multer for image uploads
 const multer = require("multer")
 const upload = multer({ storage: multer.memoryStorage() })
 
@@ -19,19 +25,104 @@ console.log("Supabase Key:", process.env.SUPABASE_KEY?.slice(0, 20))
 app.use(cors())
 app.use(express.json())
 
-// warm up Supabase connection on server start
 supabase.from("accounts").select("count").then(() => {
   console.log("Supabase connection ready")
 }).catch(() => {
   console.log("Supabase warmup failed - will retry on first request")
 })
 
-
 // ===================== Recipes =====================
+
+app.post("/recipes/parse-url", async (req, res) => {
+  const { url } = req.body
+  if (!url) return res.status(400).json({ error: "No URL provided" })
+  try {
+    const pageRes = await axios.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+      timeout: 10000
+    })
+
+    const html = pageRes.data
+
+    // Extract all JSON-LD blocks
+    const jsonLdMatches = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/gi)]
+
+    let recipe = null
+    for (const match of jsonLdMatches) {
+      try {
+        const json = JSON.parse(match[1])
+        // Handle both single object and @graph array
+        const items = json["@graph"] ? json["@graph"] : [json]
+        const found = items.find(item =>
+          item["@type"] === "Recipe" ||
+          (Array.isArray(item["@type"]) && item["@type"].includes("Recipe"))
+        )
+        if (found) { recipe = found; break }
+      } catch { continue }
+    }
+
+    if (!recipe) return res.status(422).json({ error: "No recipe data found on this page" })
+
+    // Parse cook time from ISO 8601 duration e.g. PT45M or PT1H30M
+    const parseDuration = (iso) => {
+      if (!iso) return null
+      const hours = iso.match(/(\d+)H/)?.[1] ?? 0
+      const mins = iso.match(/(\d+)M/)?.[1] ?? 0
+      return parseInt(hours) * 60 + parseInt(mins)
+    }
+
+    const totalTime = parseDuration(recipe.totalTime) ||
+      (parseDuration(recipe.prepTime) ?? 0) + (parseDuration(recipe.cookTime) ?? 0) || null
+
+    const ingredients = Array.isArray(recipe.recipeIngredient)
+      ? recipe.recipeIngredient.join("\n")
+      : null
+
+    const instructions = Array.isArray(recipe.recipeInstructions)
+      ? recipe.recipeInstructions.map(s => {
+          if (typeof s === "string") return s
+          if (s["@type"] === "HowToStep") return s.text
+          if (s["@type"] === "HowToSection") return s.itemListElement?.map(i => i.text).join("\n")
+          return ""
+        }).filter(Boolean).join("\n")
+      : typeof recipe.recipeInstructions === "string"
+        ? recipe.recipeInstructions
+        : null
+
+    const servings = recipe.recipeYield
+      ? parseInt(Array.isArray(recipe.recipeYield) ? recipe.recipeYield[0] : recipe.recipeYield) || null
+      : null
+
+    res.json({
+      name: recipe.name ?? null,
+      description: recipe.description ?? null,
+      blurb: null,
+      culture: recipe.recipeCuisine ?? null,
+      category: recipe.recipeCategory ?? null,
+      meal_type: null,
+      cook_time: totalTime,
+      servings,
+      price: null,
+      time_of_year: null,
+      ingredients,
+      instructions,
+      pairings: null,
+      items_needed: null,
+    })
+  } catch (err) {
+    console.error("Parse error:", err.message)
+    res.status(500).json({ error: "Failed to parse recipe from URL" })
+  }
+})
 
 app.post("/recipes/upload-image", upload.single("image"), async (req, res) => {
   try {
     const file = req.file
+    if (!file) return res.status(400).json({ error: "No file provided" })
     const fileName = `${Date.now()}-${file.originalname.replace(/\s/g, "_")}`
     const { data, error } = await supabase.storage
       .from("recipe-images")
@@ -42,11 +133,10 @@ app.post("/recipes/upload-image", upload.single("image"), async (req, res) => {
       .getPublicUrl(fileName)
     res.json({ url: urlData.publicUrl })
   } catch (err) {
-    console.error(err)
+    console.error("Upload error:", err)
     res.status(500).json({ error: err.message })
   }
 })
-
 
 app.get("/recipes", async (req, res) => {
   const { data, error } = await supabase
@@ -69,24 +159,18 @@ app.get("/recipes/:id", async (req, res) => {
 })
 
 app.post("/recipes", async (req, res) => {
-  const { name, description, culture, category, image_url, cook_time,
-        price, time_of_year, servings, ingredients, instructions,
-        pairings, items_needed, blurb, meal_type } = req.body = req.body
   const { data, error } = await supabase
     .from("recipes")
-    .insert([{ name, description, culture, category, image_url, cook_time, price, time_of_year, ingredients, instructions, pairings, items_needed }])
+    .insert([req.body])
     .select()
   if (error) return res.status(500).json({ error: error.message })
   res.json(data[0])
 })
 
 app.patch("/recipes/:id", async (req, res) => {
-  const { name, description, culture, category, image_url, cook_time,
-        price, time_of_year, servings, ingredients, instructions,
-        pairings, items_needed, blurb, meal_type } = req.body = req.body
   const { data, error } = await supabase
     .from("recipes")
-    .update({ name, description, culture, category, image_url, cook_time, price, time_of_year, ingredients, instructions, pairings, items_needed })
+    .update(req.body)
     .eq("id", req.params.id)
     .select()
   if (error) return res.status(500).json({ error: error.message })
@@ -100,26 +184,6 @@ app.delete("/recipes/:id", async (req, res) => {
     .eq("id", req.params.id)
   if (error) return res.status(500).json({ error: error.message })
   res.json({ success: true })
-})
-
-
-app.post("/recipes/upload-image", upload.single("image"), async (req, res) => {
-  try {
-    const file = req.file
-    if (!file) return res.status(400).json({ error: "No file provided" })
-    const fileName = `${Date.now()}-${file.originalname.replace(/\s/g, "_")}`
-    const { data, error } = await supabase.storage
-      .from("recipe-images")
-      .upload(fileName, file.buffer, { contentType: file.mimetype })
-    if (error) return res.status(500).json({ error: error.message })
-    const { data: urlData } = supabase.storage
-      .from("recipe-images")
-      .getPublicUrl(fileName)
-    res.json({ url: urlData.publicUrl })
-  } catch (err) {
-    console.error("Upload error:", err)
-    res.status(500).json({ error: err.message })
-  }
 })
 
 // ===================== End Recipes =====================
@@ -147,10 +211,8 @@ app.patch("/workouts/:id", async (req, res) => {
 })
 
 app.delete("/workouts/:id", async (req, res) => {
-  // Delete exercises first to avoid orphaned rows (also handled by ON DELETE CASCADE in Supabase if configured)
   const { error: exError } = await supabase.from("workout_exercises").delete().eq("workout_id", req.params.id)
   if (exError) return res.status(500).json({ error: exError.message })
-
   const { error } = await supabase.from("workouts").delete().eq("id", req.params.id)
   if (error) return res.status(500).json({ error: error.message })
   res.json({ success: true })
@@ -225,7 +287,6 @@ app.patch("/finance/accounts/:id", async (req, res) => {
 })
 
 app.delete("/finance/accounts/:id", async (req, res) => {
-  // Delete transactions for this account first to avoid orphaned rows
   const { error: txError } = await supabase.from("transactions").delete().eq("account_id", req.params.id)
   if (txError) return res.status(500).json({ error: txError.message })
   const { error } = await supabase.from("accounts").delete().eq("id", req.params.id)
@@ -305,40 +366,13 @@ app.post("/finance/budgets", async (req, res) => {
 })
 // ===================== End Finance - Budgets =====================
 
-
-// ===================== CSFloat Inventory endpoint =====================
-/* 
-let cachedInventory = null
-let lastFetchedInventory = null
-
-app.get("/csfloat/inventory", async (req, res) => {
-  if (cachedInventory && lastFetchedInventory && (Date.now() - lastFetchedInventory) < 30 * 60 * 1000) {
-    return res.json(cachedInventory)
-  }
-  try {
-    const response = await axios.get("https://csfloat.com/api/v1/me/inventory", {
-      headers: { Authorization: process.env.CSFLOAT_API_KEY }
-    })
-    cachedInventory = response.data
-    lastFetchedInventory = Date.now()
-    res.json(cachedInventory)
-  } catch (error) {
-    console.error(error.response?.status, error.response?.data || error.message)
-    res.status(500).json({ error: error.response?.data || error.message })
-  }
-})
-*/
-// ===================== End CSFloat Inventory endpoint =================
-
 // ================   Yahoo Stock endpoint.  ============================
 app.get("/stock/:symbol", async (req, res) => {
   const { symbol } = req.params
   try {
     const response = await axios.get(
       `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`,
-      {
-        headers: { "User-Agent": "Mozilla/5.0" }
-      }
+      { headers: { "User-Agent": "Mozilla/5.0" } }
     )
     res.json(response.data)
   } catch (error) {
@@ -360,11 +394,7 @@ app.get("/leetify", async (req, res) => {
       `https://api-public.cs-prod.leetify.com/v3/profile`,
       {
         params: { steam64_id: STEAM_ID },
-        headers: {
-          "X-Api-Key": API_KEY,
-          "Accept": "application/json",
-          "User-Agent": "Mozilla/5.0"
-        }
+        headers: { "X-Api-Key": API_KEY, "Accept": "application/json", "User-Agent": "Mozilla/5.0" }
       }
     )
     cachedData = response.data
@@ -375,9 +405,8 @@ app.get("/leetify", async (req, res) => {
     res.status(500).json({ error: error.response?.data || error.message })
   }
 })
-// =====================   End of Leetify API endpoint =================================
 
-// =====================   Start of Leetify Matches API endpoint =================================
+// =====================   Leetify Matches API endpoint =================================
 let cachedMatches = null
 let lastFetchedMatches = null
 
@@ -390,11 +419,7 @@ app.get("/leetify/matches", async (req, res) => {
       `https://api-public.cs-prod.leetify.com/v3/profile/matches`,
       {
         params: { steam64_id: STEAM_ID },
-        headers: {
-          "X-Api-Key": API_KEY,
-          "Accept": "application/json",
-          "User-Agent": "Mozilla/5.0"
-        }
+        headers: { "X-Api-Key": API_KEY, "Accept": "application/json", "User-Agent": "Mozilla/5.0" }
       }
     )
     cachedMatches = response.data
@@ -405,20 +430,15 @@ app.get("/leetify/matches", async (req, res) => {
     res.status(500).json({ error: error.response?.data || error.message })
   }
 })
-// =====================   End of Leetify Matches API endpoint =================================
-
 
 // ===================== Wishlist endpoints =====================
 app.get("/wishlist/:category", async (req, res) => {
-  console.log("Hitting wishlist endpoint, category:", req.params.category)
-  console.log("Supabase URL:", process.env.SUPABASE_URL)
   const { category } = req.params
   const { data, error } = await supabase
     .from("wishlist")
     .select("*")
     .eq("category", category)
     .order("created_at", { ascending: false })
-  console.log("Supabase data:", data, "error:", error)
   if (error) return res.status(500).json({ error: error.message })
   res.json(data)
 })
@@ -434,10 +454,7 @@ app.post("/wishlist", async (req, res) => {
 })
 
 app.delete("/wishlist/:id", async (req, res) => {
-  const { error } = await supabase
-    .from("wishlist")
-    .delete()
-    .eq("id", req.params.id)
+  const { error } = await supabase.from("wishlist").delete().eq("id", req.params.id)
   if (error) return res.status(500).json({ error: error.message })
   res.json({ success: true })
 })
@@ -450,11 +467,7 @@ app.post("/matches/sync", async (req, res) => {
       "https://api-public.cs-prod.leetify.com/v3/profile/matches",
       {
         params: { steam64_id: STEAM_ID },
-        headers: {
-          "X-Api-Key": API_KEY,
-          "Accept": "application/json",
-          "User-Agent": "Mozilla/5.0"
-        }
+        headers: { "X-Api-Key": API_KEY, "Accept": "application/json", "User-Agent": "Mozilla/5.0" }
       }
     )
     const matches = response.data
@@ -467,9 +480,7 @@ app.post("/matches/sync", async (req, res) => {
       team_scores: m.team_scores,
       stats: m.stats
     }))
-    const { error } = await supabase
-      .from("matches")
-      .upsert(toInsert, { onConflict: "id" })
+    const { error } = await supabase.from("matches").upsert(toInsert, { onConflict: "id" })
     if (error) return res.status(500).json({ error: error.message })
     res.json({ synced: toInsert.length })
   } catch (error) {

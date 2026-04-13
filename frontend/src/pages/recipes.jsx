@@ -39,6 +39,9 @@ export default function Recipes() {
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [uploading, setUploading] = useState(false)
+  const [urlInput, setUrlInput] = useState("")
+  const [parsing, setParsing] = useState(false)
+  const [parseError, setParseError] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -153,15 +156,53 @@ export default function Recipes() {
     }
   }
 
-    const pickRandom = (mealFilter) => {
-        let pool = [...recipes]
-            if (mealFilter && mealFilter !== "Any") {
-                pool = pool.filter(r => r.meal_type === mealFilter)
-            }
-            if (pool.length === 0) return
-            const pick = pool[Math.floor(Math.random() * pool.length)]
-        setRandomMeal(pick)
-     }
+  const pickRandom = (mealFilter) => {
+    let pool = [...recipes]
+    if (mealFilter && mealFilter !== "Any") {
+      pool = pool.filter(r => r.meal_type === mealFilter)
+    }
+    if (pool.length === 0) return
+    const pick = pool[Math.floor(Math.random() * pool.length)]
+    setRandomMeal(pick)
+  }
+
+  const handleParseUrl = async () => {
+    if (!urlInput.trim()) return
+    setParsing(true)
+    setParseError(null)
+    try {
+      const res = await fetch("/recipes/parse-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: urlInput })
+      })
+      if (!res.ok) throw new Error("Failed to parse URL")
+      const data = await res.json()
+      setForm(f => ({
+        ...f,
+        name: data.name ?? f.name,
+        description: data.description ?? f.description,
+        blurb: data.blurb ?? f.blurb,
+        culture: data.culture ?? f.culture,
+        category: data.category ?? f.category,
+        meal_type: data.meal_type ?? f.meal_type,
+        cook_time: data.cook_time ?? f.cook_time,
+        servings: data.servings ?? f.servings,
+        price: data.price ?? f.price,
+        time_of_year: data.time_of_year ?? f.time_of_year,
+        ingredients: data.ingredients ?? f.ingredients,
+        instructions: data.instructions ?? f.instructions,
+        pairings: data.pairings ?? f.pairings,
+        items_needed: data.items_needed ?? f.items_needed,
+      }))
+      setUrlInput("")
+    } catch (err) {
+      console.error(err)
+      setParseError("Couldn't parse that URL. Try a different recipe site.")
+    } finally {
+      setParsing(false)
+    }
+  }
 
   const cancelForm = () => {
     setShowForm(false)
@@ -180,60 +221,60 @@ export default function Recipes() {
           <h1 className={styles.title}>Recipes</h1>
           <p className={styles.subtitle}>{recipes.length} recipes collected</p>
         </div>
-        <button className={styles.addButton} onClick={() => { cancelForm(); setShowForm(s => !s) }}>
-          {showForm && !editingId ? "Cancel" : "+ Add Recipe"}
+        <button className={styles.addButton} onClick={() => showForm ? cancelForm() : setShowForm(true)}>
+            {showForm && !editingId ? "Cancel" : "+ Add Recipe"}
         </button>
       </div>
 
       <div className={styles.randomSection}>
-  <p className={styles.randomLabel}>Not sure what to cook?</p>
-  <div className={styles.randomControls}>
-    {["Any", "Breakfast", "Lunch", "Dinner"].map(m => (
-      <button
-        key={m}
-        onClick={() => setRandomMealType(m)}
-        className={randomMealType === m ? styles.filterActive : styles.filter}
-      >
-        {m}
-      </button>
-    ))}
-    <button className={styles.randomButton} onClick={() => pickRandom(randomMealType)}>
-      Pick for me
-    </button>
-  </div>
-</div>
+        <p className={styles.randomLabel}>Not sure what to cook?</p>
+        <div className={styles.randomControls}>
+          {["Any", "Breakfast", "Lunch", "Dinner"].map(m => (
+            <button
+              key={m}
+              onClick={() => setRandomMealType(m)}
+              className={randomMealType === m ? styles.filterActive : styles.filter}
+            >
+              {m}
+            </button>
+          ))}
+          <button className={styles.randomButton} onClick={() => pickRandom(randomMealType)}>
+            Pick for me
+          </button>
+        </div>
+      </div>
 
-        {randomMeal && (
+      {randomMeal && (
         <div className={styles.randomOverlay} onClick={() => setRandomMeal(null)}>
-            <div className={styles.randomModal} onClick={e => e.stopPropagation()}>
+          <div className={styles.randomModal} onClick={e => e.stopPropagation()}>
             <button className={styles.randomClose} onClick={() => setRandomMeal(null)}>✕</button>
             <p className={styles.randomModalLabel}>Tonight you're making</p>
             {randomMeal.image_url && (
-                <img src={randomMeal.image_url} alt={randomMeal.name} className={styles.randomModalImg} />
+              <img src={randomMeal.image_url} alt={randomMeal.name} className={styles.randomModalImg} />
             )}
             <h2 className={styles.randomModalName}>{randomMeal.name}</h2>
             <div className={styles.cardMeta} style={{ justifyContent: "center", marginBottom: "0.75rem" }}>
-                {randomMeal.category && <span className={styles.categoryBadge}>{randomMeal.category}</span>}
-                {randomMeal.culture && <span className={styles.cultureBadge}>{randomMeal.culture}</span>}
-                {randomMeal.meal_type && <span className={styles.mealBadge}>{randomMeal.meal_type}</span>}
+              {randomMeal.category && <span className={styles.categoryBadge}>{randomMeal.category}</span>}
+              {randomMeal.culture && <span className={styles.cultureBadge}>{randomMeal.culture}</span>}
+              {randomMeal.meal_type && <span className={styles.mealBadge}>{randomMeal.meal_type}</span>}
             </div>
             {randomMeal.blurb && <p className={styles.randomModalBlurb}>{randomMeal.blurb}</p>}
             <div className={styles.randomModalStats}>
-                {randomMeal.cook_time && <span>⏱ {randomMeal.cook_time} min</span>}
-                {randomMeal.servings && <span>🍽 {randomMeal.servings} servings</span>}
-                {randomMeal.price && <span>💰 ~${parseFloat(randomMeal.price).toFixed(2)}</span>}
+              {randomMeal.cook_time && <span>⏱ {randomMeal.cook_time} min</span>}
+              {randomMeal.servings && <span>🍽 {randomMeal.servings} servings</span>}
+              {randomMeal.price && <span>💰 ~${parseFloat(randomMeal.price).toFixed(2)}</span>}
             </div>
             <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center", marginTop: "1.25rem" }}>
-                <button className={styles.submitButton} onClick={() => { setRandomMeal(null); navigate(`/recipes/${randomMeal.id}`) }}>
+              <button className={styles.submitButton} onClick={() => { setRandomMeal(null); navigate(`/recipes/${randomMeal.id}`) }}>
                 See Recipe
-                </button>
-                <button className={styles.cancelButton} onClick={() => pickRandom(randomMealType)}>
+              </button>
+              <button className={styles.cancelButton} onClick={() => pickRandom(randomMealType)}>
                 Pick Again
-                </button>
+              </button>
             </div>
-            </div>
+          </div>
         </div>
-        )}
+      )}
 
       {actionError && (
         <div className={styles.errorBanner}>
@@ -245,6 +286,28 @@ export default function Recipes() {
       {showForm && (
         <div className={styles.form}>
           <h3 className={styles.formTitle}>{editingId ? "Edit Recipe" : "Add Recipe"}</h3>
+
+          {/* Auto-fill from URL */}
+          <div className={styles.urlParseSection}>
+            <p className={styles.formSectionLabel}>Auto-fill from URL</p>
+            <div className={styles.urlParseRow}>
+              <input
+                className={styles.input}
+                placeholder="Paste a recipe URL..."
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button
+                className={styles.submitButton}
+                onClick={handleParseUrl}
+                disabled={parsing || !urlInput.trim()}
+              >
+                {parsing ? "Parsing..." : "✨ Auto-fill"}
+              </button>
+            </div>
+            {parseError && <p style={{ color: "#e57373", fontSize: "0.8rem", marginTop: "0.4rem" }}>{parseError}</p>}
+          </div>
 
           {/* Section: Basic Info */}
           <p className={styles.formSectionLabel}>Basic Info</p>
@@ -265,27 +328,22 @@ export default function Recipes() {
                 {MEAL_TYPES.filter(m => m !== "All Meals").map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
-
             <div className={styles.formGroup}>
               <label className={styles.label}>Culture / Origin</label>
               <input className={styles.input} placeholder="e.g. French" value={form.culture} onChange={e => setForm(f => ({ ...f, culture: e.target.value }))} />
             </div>
-
             <div className={styles.formGroup}>
               <label className={styles.label}>Cook Time (min)</label>
               <input className={styles.input} type="number" placeholder="45" value={form.cook_time} onChange={e => setForm(f => ({ ...f, cook_time: e.target.value }))} />
             </div>
-
             <div className={styles.formGroup}>
-                <label className={styles.label}>Servings</label>
-                <input className={styles.input} type="number" placeholder="4" value={form.servings} onChange={e => setForm(f => ({ ...f, servings: e.target.value }))} />
+              <label className={styles.label}>Servings</label>
+              <input className={styles.input} type="number" placeholder="4" value={form.servings} onChange={e => setForm(f => ({ ...f, servings: e.target.value }))} />
             </div>
-
             <div className={styles.formGroup}>
               <label className={styles.label}>Estimated Price ($)</label>
               <input className={styles.input} type="number" placeholder="15.00" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
             </div>
-
             <div className={styles.formGroup}>
               <label className={styles.label}>Best Time of Year</label>
               <input className={styles.input} placeholder="e.g. Winter, All year" value={form.time_of_year} onChange={e => setForm(f => ({ ...f, time_of_year: e.target.value }))} />
@@ -367,18 +425,12 @@ export default function Recipes() {
             ))}
           </div>
         </div>
-            {/* 
-            
-                    <div className={styles.sortRow}>
+        <div className={styles.sortRow}>
           <span className={styles.sortLabel}>Sort by</span>
           {SORT_OPTIONS.map(o => (
             <button key={o.value} onClick={() => setSortBy(o.value)} className={sortBy === o.value ? styles.filterActive : styles.filter}>{o.label}</button>
           ))}
         </div>
-            
-
-            */}
-       
       </div>
 
       {filtered.length === 0 && (
